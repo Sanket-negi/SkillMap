@@ -55,44 +55,59 @@ if input_text:
 
     # Initialize LLM
     llm = Ollama(model="gemma:2b")
-    memory = ConversationSummaryMemory(
-        llm=llm,
-        memory_key="chat_history",
-        return_messages=True,
-        input_key="question",    
-        output_key="answer" 
-    )
+
+    # Load memory
+    if "memory" not in st.session_state:
+        st.session_state.memory = ConversationSummaryMemory(
+            llm=llm,
+            memory_key="chat_history",
+            return_messages=True,
+            input_key="question",
+            output_key="answer"
+        )
+
+    memory = st.session_state.memory
 
     #  Check if vectorstore is ready (PDF uploaded)
     if st.session_state.vectorstore is not None:
-        retriever = st.session_state.vectorstore.as_retriever()
-
-        # retrieve relevant docs
+        retriever = st.session_state.vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 4})
         docs = retriever.invoke(input_text)
 
         # manually build the context
         context = "\n\n".join(doc.page_content for doc in docs)
 
         # manually build final prompt
-        final_prompt = f"""You are a resume optimizer assistant. Always reply helping user to improve resume, in proffessional teaching style like a HR of a MNC. 
-Add helpful tips or suggestions with  remarks when appropriate.
+        final_prompt = f"""You are a resume optimizer assistant. Always reply helping user to improve resume, in professional teaching style like a HR of a MNC. 
+Add helpful tips or suggestions with remarks when appropriate.
 
 Here is some context to help you answer:
 {context}
 
-Now, based on the context, answer the following question like a mentor helping build a strong resume:
+Here is the past conversation for reference:
+{memory.buffer}
+
+Now, based on the above, answer the following question like a mentor helping build a strong resume:
 {input_text}
 
-If you don't know the answer, make up something impressive but mention you are you are not sure.
-
+If you don't know the answer, make up something impressive but mention you are not sure.
 """
 
+        # send to LLM
         answer = llm.invoke(final_prompt)
+
+        # Save conversation into memory
+        memory.save_context({"question": input_text}, {"answer": answer})
+
+        # Show assistant's message
+        st.chat_message("assistant").markdown(answer)
+
+        # 🧠 Show retrieved documents (optional, nice feature)
+        with st.expander("🔎 Retrieved Context (Click to view)"):
+            st.markdown(context)
 
     else:
         # fallback if no PDF
         answer = llm.invoke(input_text)
+        st.chat_message("assistant").markdown(answer)
 
-    # Show assistant's message
-    st.chat_message("assistant").markdown(answer)
     st.session_state.messages.append({"role": "assistant", "content": answer})
